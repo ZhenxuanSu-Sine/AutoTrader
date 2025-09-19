@@ -12,7 +12,7 @@ from typing import Optional
 
 import backtrader as bt
 
-from ..framework.strategy_base import BaseStrategy
+from framework.strategy_base import BaseStrategy
 
 
 class BuyAndHoldStrategy(BaseStrategy):

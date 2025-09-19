@@ -1,113 +1,87 @@
 # AutoTrader
 
-This repository contains a very simple end‑to‑end framework for building and
-evaluating automated trading strategies.  The goal of this project is to
-provide a **minimal working example** showing how to set up a Backtrader‑based
-backtesting environment, fetch data from [Tushare](https://tushare.pro),
-write trivial strategies (such as buy‑and‑hold or random trading) and
-generate basic performance metrics.  Once you are comfortable with the
-framework you can extend it by adding your own data sources (for example
-PostgreSQL databases with custom factors), more sophisticated strategies and
-richer evaluation reports.
+一个极简的端到端量化回测脚手架：**AKShare 拉取行情 → 统一 CSV Schema → Backtrader 回测 → 输出基础指标**。适合做低频/低算力的入门与原型验证，后续可扩展到自定义因子、数据库存储与更丰富的评估。
 
-## Getting started on Windows 11
+## 快速上手（Windows 11 + conda）
 
-These instructions assume you are running **Windows 11** and have
-[Anaconda](https://www.anaconda.com/products/distribution) installed.  If
-Anaconda is not installed yet, download and install it first.  The
-following steps create a fresh Python environment and install the
-dependencies required by this project.
+> 需要已安装 [Anaconda](https://www.anaconda.com/products/distribution)。
 
-```batch
-:: 1. Create a new conda environment with Python 3.10
+```bat
+:: 1) 创建并激活环境（Python 3.10 建议）
 conda create -n autotrader python=3.10 -y
-
-:: 2. Activate the environment
 conda activate autotrader
 
-:: 3. Install core scientific packages from the conda‑forge channel
+:: 2) 安装依赖
 conda install -c conda-forge numpy pandas matplotlib pytz joblib -y
+pip install backtrader akshare quantstats
 
-:: 4. Install Backtrader using pip (Backtrader is not available on
-::    conda-forge at the time of writing)
-pip install backtrader
-
-:: 5. Install Tushare and other data/analysis libraries
-pip install tushare quantstats
-
-:: 6. (Optional) Install JupyterLab for notebooks
+:: 3) （可选）Jupyter
 conda install -c conda-forge jupyterlab ipykernel -y
-
-:: 7. Register the kernel for notebooks (optional)
 python -m ipykernel install --user --name autotrader --display-name "Python (autotrader)"
-
-:: 8. (Optional) Install extra libraries for machine learning
-pip install scikit-learn xgboost lightgbm
-
 ```
 
-> **Note**
->
-> Some data provided by Tushare require a token.  Visit
-> <https://tushare.pro> to register and obtain a personal API token.
-> Once you have the token you can set it in your scripts via
->
-> ```python
-> import tushare as ts
-> ts.set_token("YOUR_TUSHARE_TOKEN")
-> pro = ts.pro_api()
-> ```
+## 一把梭：从数据到回测
 
-## Repository layout
-
-The project is organised into four main modules.  Each module has its own
-subdirectory under the repository root:
-
-| Directory          | Purpose                                                            |
-|--------------------|--------------------------------------------------------------------|
-| `framework/`       | Generic classes and utilities used across strategies and backtests. |
-| `data/`            | Scripts for downloading and preparing market data.                  |
-| `decision/`        | Individual trading strategies (decision logic).                    |
-| `evaluation/`      | Code for running backtests and computing simple metrics.           |
-
-You can extend or modify this structure to suit your own workflow.  For
-example, if you plan to store your own factors in a PostgreSQL database you
-could add a `storage/` module containing an ORM or database helper classes.
-
-## Usage examples
-
-The simplest way to explore the framework is to run one of the trivial
-strategies provided under `decision/`.  The commands below assume you
-have downloaded at least a few days of daily bars for a stock symbol
-using the `data/fetch_tushare_data.py` script (see that file for
-details).  This example will run two strategies – a buy‑and‑hold
-strategy and a random trading strategy – on the same dataset and
-report some basic results:
+1. **用 AKShare 拉日线行情 → 存 CSV（统一 6 列：`datetime, open, high, low, close, volume`）**
 
 ```bash
-# Activate your environment first
-conda activate autotrader
-
-# Change into the project directory and run the evaluation
-python evaluation/evaluate.py \
-    --data-file data/sample_000001.SZ.csv \
-    --strategy buy_hold \
-    --capital 100000
-
-python evaluation/evaluate.py \
-    --data-file data/sample_000001.SZ.csv \
-    --strategy random \
-    --capital 100000
-
+python data/fetch_akshare_data.py ^
+  --symbol 600519 ^
+  --start 20220101 --end 20241231 ^
+  --adjust qfq ^
+  --outfile data/sample_600519.csv
 ```
 
-Both commands print final portfolio value and other statistics to the
-console.  See `evaluation/evaluate.py` for more options such as
-changing the commission, slippage or time range.
+2. **跑两个 baseline 策略（买入持有、随机交易）**
 
-## Contributing
+```bash
+# 在仓库根目录执行
+python -m evaluation.evaluate ^
+  --data-file data/sample_600519.csv ^
+  --strategy buy_hold ^
+  --capital 100000
 
-This project is intended as a lightweight starting point.  Feel free to
-fork the repository and add new strategies, additional data
-connectors, visualisation tools or machine learning models.  Pull
-requests are welcome!
+python -m evaluation.evaluate ^
+  --data-file data/sample_600519.csv ^
+  --strategy random ^
+  --capital 100000
+```
+
+3. **看输出**
+   终端会打印期末资金、简单收益等。更多参数请看 `evaluation/evaluate.py`（手续费 `--commission`、滑点 `--slippage` 等）。
+
+> 备注：评估脚本默认把 CSV 读成 `bt.feeds.PandasData`，只要符合上面的 6 列合同，任何来源都能即插即用（AKShare/自建库导出/其它接口）。
+
+## 目录结构
+
+* `framework/`：通用基类与工具（如 `BaseStrategy`）。
+* `data/`：数据获取脚本（此处使用 AKShare）。
+* `decision/`：策略实现（如 `buy_and_hold.py`、`random_trader.py`）。
+* `evaluation/`：回测与评估 CLI（`evaluate.py`）。
+
+## 可选：本地机密管理（`.env`）
+
+本仓库的 AKShare 不需要 token；如果你后续接入需要凭据的服务，建议用 `.env`：
+
+1. 建模板：`.env.example`（示例：`FOO_TOKEN=your_token_here`）
+2. 本地复制生成 `.env`，填入真实值；`.gitignore` 忽略 `.env`
+3. 代码里用 `python-dotenv` 读取：
+
+```bash
+pip install python-dotenv
+```
+
+```python
+from dotenv import load_dotenv, find_dotenv
+import os
+load_dotenv(find_dotenv())
+secret = os.getenv("FOO_TOKEN")
+```
+
+## 参考
+
+* **AKShare**：开源金融数据接口库，覆盖股票/期货/基金/外汇等多市场数据。使用前请阅读其文档与数据源说明：
+
+  * GitHub: [https://github.com/akfamily/akshare](https://github.com/akfamily/akshare)
+  * 文档: [https://akshare.xyz](https://akshare.xyz)
+* **Backtrader**：Python 回测与交易框架：[https://www.backtrader.com/](https://www.backtrader.com/)

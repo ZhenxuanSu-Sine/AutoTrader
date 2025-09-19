@@ -13,7 +13,7 @@ import random
 
 import backtrader as bt
 
-from ..framework.strategy_base import BaseStrategy
+from framework.strategy_base import BaseStrategy
 
 
 class RandomTraderStrategy(BaseStrategy):

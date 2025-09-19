@@ -41,7 +41,7 @@ def load_strategy(name: str) -> Type[bt.Strategy]:
     if name not in mapping:
         raise KeyError(f'Unknown strategy: {name}')
     module_name, class_name = mapping[name].rsplit('.', 1)
-    module = importlib.import_module(f'autotrader_local.decision.{module_name}')
+    module = importlib.import_module(f'decision.{module_name}')
     return getattr(module, class_name)
 
 
