@@ -42,7 +42,9 @@ class JoinQuantExportTests(unittest.TestCase):
             self.assertIn("import jqdata", helper)
             self.assertIn("set_benchmark('000300.XSHG')", helper)
             self.assertIn("def market_open(context):", helper)
-            self.assertIn("order_target_percent", helper)
+            self.assertIn("context.portfolio.total_value", helper)
+            self.assertIn("order_target_value", helper)
+            self.assertNotIn("order_target_percent", helper)
 
 
 if __name__ == "__main__":

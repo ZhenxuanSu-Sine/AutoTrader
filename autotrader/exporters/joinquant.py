@@ -66,7 +66,8 @@ def export_joinquant_weights(
 
     - ``date``: rebalance date, ``YYYY-MM-DD``
     - ``code``: JoinQuant security code, such as ``600519.XSHG``
-    - ``weight``: target portfolio weight
+    - ``weight``: target portfolio weight. Generated helpers convert this to
+      ``order_target_value(security, context.portfolio.total_value * weight)``.
     """
 
     required = {"timestamp", "symbol", "weight"}
@@ -157,11 +158,13 @@ def _joinquant_python_template(exported: pd.DataFrame) -> str:
         "\n"
         "    # 不在本期目标组合内的持仓清零\n"
         "    for security in current - target_codes:\n"
-        "        order_target_percent(security, 0)\n"
+        "        order_target_value(security, 0)\n"
         "\n"
-        "    # 按目标权重调仓\n"
+        "    portfolio_value = context.portfolio.total_value\n"
+        "\n"
+        "    # 按目标权重调仓：权重需换算成聚宽 order_target_value 接受的目标市值。\n"
         "    for security, weight in targets.items():\n"
-        "        order_target_percent(security, weight)\n"
+        "        order_target_value(security, portfolio_value * weight)\n"
         "\n"
         "    log.info('Rebalanced %s, holdings=%d, gross_weight=%.4f' % (\n"
         "        today, len(targets), sum(targets.values())\n"

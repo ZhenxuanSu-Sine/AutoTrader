@@ -8430,11 +8430,13 @@ def market_open(context):
 
     # 不在本期目标组合内的持仓清零
     for security in current - target_codes:
-        order_target_percent(security, 0)
+        order_target_value(security, 0)
 
-    # 按目标权重调仓
+    portfolio_value = context.portfolio.total_value
+
+    # 按目标权重调仓：权重需换算成聚宽 order_target_value 接受的目标市值。
     for security, weight in targets.items():
-        order_target_percent(security, weight)
+        order_target_value(security, portfolio_value * weight)
 
     log.info('Rebalanced %s, holdings=%d, gross_weight=%.4f' % (
         today, len(targets), sum(targets.values())
