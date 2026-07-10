@@ -21,16 +21,7 @@ class JoinQuantExportResult:
 
 
 def csmar_symbol_to_joinquant(symbol: str, *, include_unsupported: bool = False) -> str | None:
-    """Convert canonical A-share symbols to JoinQuant security codes.
-
-    Supported conversions:
-
-    - ``600000.SH`` -> ``600000.XSHG``
-    - ``000001.SZ`` -> ``000001.XSHE``
-
-    North Exchange symbols are returned only when ``include_unsupported`` is
-    true, because they may not be usable in all JoinQuant environments.
-    """
+    """Convert canonical A-share symbols to JoinQuant security codes."""
 
     value = str(symbol).strip().upper()
     if value.endswith(".XSHG") or value.endswith(".XSHE"):
@@ -58,6 +49,10 @@ def export_joinquant_weights(
     joinquant_weights_path: str | None = None,
     include_unsupported: bool = False,
     min_weight: float = 0.0,
+    joinquant_max_positions: int = 20,
+    joinquant_min_position_value: float = 5_000.0,
+    joinquant_cash_buffer: float = 0.02,
+    joinquant_lot_size: int = 100,
 ) -> JoinQuantExportResult:
     """Export ``timestamp/symbol/weight`` rows as JoinQuant target weights.
 
@@ -67,8 +62,10 @@ def export_joinquant_weights(
     - ``code``: JoinQuant security code, such as ``600519.XSHG``
     - ``weight``: target portfolio weight
 
-    Generated JoinQuant helpers read this CSV through ``read_file(path)`` and
-    submit target values with ``order_target_value``.
+    Generated JoinQuant helpers read the CSV via ``read_file(path)`` and
+    convert weights into board-lot target shares. This is intentional: for a
+    small personal account, directly submitting tiny target values causes many
+    invalid odd-lot close/open orders in JoinQuant.
     """
 
     required = {"timestamp", "symbol", "weight"}
@@ -77,6 +74,14 @@ def export_joinquant_weights(
         raise ValueError(f"weights missing columns: {sorted(missing)}")
     if min_weight < 0:
         raise ValueError("min_weight must be non-negative")
+    if joinquant_max_positions < 1:
+        raise ValueError("joinquant_max_positions must be positive")
+    if joinquant_min_position_value < 0:
+        raise ValueError("joinquant_min_position_value must be non-negative")
+    if not 0 <= joinquant_cash_buffer < 1:
+        raise ValueError("joinquant_cash_buffer must be in [0, 1)")
+    if joinquant_lot_size < 1:
+        raise ValueError("joinquant_lot_size must be positive")
 
     data = weights[list(required)].copy()
     data["timestamp"] = pd.to_datetime(data["timestamp"])
@@ -100,7 +105,16 @@ def export_joinquant_weights(
     if py_output is not None:
         py_output.parent.mkdir(parents=True, exist_ok=True)
         private_path = joinquant_weights_path or csv_output.name
-        py_output.write_text(_joinquant_python_template(private_path), encoding="utf-8")
+        py_output.write_text(
+            _joinquant_python_template(
+                private_path,
+                max_positions=joinquant_max_positions,
+                min_position_value=joinquant_min_position_value,
+                cash_buffer=joinquant_cash_buffer,
+                lot_size=joinquant_lot_size,
+            ),
+            encoding="utf-8",
+        )
 
     summary_output = (
         Path(summary_path) if summary_path is not None else csv_output.with_suffix(".summary.csv")
@@ -125,13 +139,25 @@ def export_joinquant_weights(
     )
 
 
-def _joinquant_python_template(joinquant_weights_path: str) -> str:
+def _joinquant_python_template(
+    joinquant_weights_path: str,
+    *,
+    max_positions: int,
+    min_position_value: float,
+    cash_buffer: float,
+    lot_size: int,
+) -> str:
     return (
         "# 导入聚宽函数库\n"
         "import jqdata\n\n\n"
         "# 权重 CSV 文件路径，需先上传到聚宽「研究」模块的私有文件空间。\n"
         "# read_file(path) 的 path 是相对私有空间根目录的路径。\n"
-        f"WEIGHTS_FILE = {joinquant_weights_path!r}\n\n\n"
+        f"WEIGHTS_FILE = {joinquant_weights_path!r}\n\n"
+        "# 小资金实盘/模拟交易约束：可以按自己的账户规模调整。\n"
+        f"MAX_POSITIONS = {max_positions}\n"
+        f"MIN_POSITION_VALUE = {float(min_position_value)!r}\n"
+        f"CASH_BUFFER = {float(cash_buffer)!r}\n"
+        f"LOT_SIZE = {int(lot_size)}\n\n\n"
         "def load_weights(path):\n"
         "    \"\"\"使用聚宽 read_file 读取 AutoTrader 导出的 date,code,weight CSV。\"\"\"\n"
         "    raw = read_file(path)\n"
@@ -148,6 +174,45 @@ def _joinquant_python_template(joinquant_weights_path: str) -> str:
         "        date, code, weight = line.split(',')\n"
         "        weights.setdefault(date, {})[code] = float(weight)\n"
         "    return weights\n\n\n"
+        "def last_price(security):\n"
+        "    \"\"\"取当前价格；若当前快照不可用则退回到最近日收盘价。\"\"\"\n"
+        "    try:\n"
+        "        price = get_current_data()[security].last_price\n"
+        "        if price and price > 0:\n"
+        "            return float(price)\n"
+        "    except Exception:\n"
+        "        pass\n"
+        "    try:\n"
+        "        hist = attribute_history(security, 1, '1d', ['close'])\n"
+        "        if len(hist) > 0:\n"
+        "            return float(hist['close'][-1])\n"
+        "    except Exception:\n"
+        "        pass\n"
+        "    return None\n\n\n"
+        "def round_lot(amount):\n"
+        "    return int(amount / LOT_SIZE) * LOT_SIZE\n\n\n"
+        "def build_target_amounts(context, raw_targets):\n"
+        "    \"\"\"把目标权重转换成适合小资金账户的一手整数股数。\"\"\"\n"
+        "    portfolio_value = context.portfolio.total_value * (1 - CASH_BUFFER)\n"
+        "    ranked = sorted(raw_targets.items(), key=lambda item: item[1], reverse=True)\n"
+        "    selected = ranked[:MAX_POSITIONS]\n"
+        "    total_weight = sum(weight for _, weight in selected)\n"
+        "    if total_weight <= 0:\n"
+        "        return {}\n"
+        "\n"
+        "    targets = {}\n"
+        "    for security, weight in selected:\n"
+        "        price = last_price(security)\n"
+        "        if price is None or price <= 0:\n"
+        "            log.info('Skip %s: invalid price' % security)\n"
+        "            continue\n"
+        "        target_value = portfolio_value * weight / total_weight\n"
+        "        if target_value < MIN_POSITION_VALUE:\n"
+        "            continue\n"
+        "        amount = round_lot(target_value / price)\n"
+        "        if amount >= LOT_SIZE:\n"
+        "            targets[security] = amount\n"
+        "    return targets\n\n\n"
         "# 初始化函数，设定基准、复权模式和运行频率\n"
         "def initialize(context):\n"
         "    # 沪深300作为默认基准，可按需要改成 000905.XSHG / 000852.XSHG 等\n"
@@ -164,25 +229,30 @@ def _joinquant_python_template(joinquant_weights_path: str) -> str:
         "# 每个交易日开盘调用；只有当天在权重表中时才调仓\n"
         "def market_open(context):\n"
         "    today = context.current_dt.strftime('%Y-%m-%d')\n"
-        "    targets = g.weights.get(today)\n"
-        "    if not targets:\n"
+        "    raw_targets = g.weights.get(today)\n"
+        "    if not raw_targets:\n"
         "        return\n"
         "\n"
+        "    target_amounts = build_target_amounts(context, raw_targets)\n"
         "    current = set(context.portfolio.positions.keys())\n"
-        "    target_codes = set(targets.keys())\n"
+        "    target_codes = set(target_amounts.keys())\n"
         "\n"
-        "    # 不在本期目标组合内的持仓清零\n"
+        "    # 不在本期可交易目标组合内的持仓清零；用 order_target 按股数清仓。\n"
         "    for security in current - target_codes:\n"
-        "        order_target_value(security, 0)\n"
+        "        position = context.portfolio.positions[security]\n"
+        "        if position.closeable_amount > 0:\n"
+        "            order_target(security, 0)\n"
         "\n"
-        "    portfolio_value = context.portfolio.total_value\n"
+        "    # 调整目标持仓。小于一手的差额不动，避免碎股/不足一手报错。\n"
+        "    for security, target_amount in target_amounts.items():\n"
+        "        position = context.portfolio.positions.get(security, None)\n"
+        "        current_amount = position.total_amount if position else 0\n"
+        "        if abs(target_amount - current_amount) < LOT_SIZE:\n"
+        "            continue\n"
+        "        order_target(security, target_amount)\n"
         "\n"
-        "    # 按目标权重调仓：权重需换算成聚宽 order_target_value 接受的目标市值。\n"
-        "    for security, weight in targets.items():\n"
-        "        order_target_value(security, portfolio_value * weight)\n"
-        "\n"
-        "    log.info('Rebalanced %s, holdings=%d, gross_weight=%.4f' % (\n"
-        "        today, len(targets), sum(targets.values())\n"
+        "    log.info('Rebalanced %s, raw=%d, tradable=%d' % (\n"
+        "        today, len(raw_targets), len(target_amounts)\n"
         "    ))\n"
-        "    record(gross_weight=sum(targets.values()), holding_count=len(targets))\n"
+        "    record(holding_count=len(target_amounts))\n"
     )

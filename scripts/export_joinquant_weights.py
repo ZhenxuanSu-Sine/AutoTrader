@@ -45,6 +45,30 @@ def main() -> None:
         default=0.0,
         help="drop rows with weight <= min-weight",
     )
+    parser.add_argument(
+        "--joinquant-max-positions",
+        type=int,
+        default=20,
+        help="maximum number of target positions in the generated JoinQuant helper",
+    )
+    parser.add_argument(
+        "--joinquant-min-position-value",
+        type=float,
+        default=5000.0,
+        help="skip generated JoinQuant positions below this target value",
+    )
+    parser.add_argument(
+        "--joinquant-cash-buffer",
+        type=float,
+        default=0.02,
+        help="cash buffer ratio reserved by the generated JoinQuant helper",
+    )
+    parser.add_argument(
+        "--joinquant-lot-size",
+        type=int,
+        default=100,
+        help="board lot size used by the generated JoinQuant helper",
+    )
     args = parser.parse_args()
 
     weights = pd.read_csv(args.weights)
@@ -56,6 +80,10 @@ def main() -> None:
         joinquant_weights_path=args.joinquant_weights_path,
         include_unsupported=args.include_unsupported,
         min_weight=args.min_weight,
+        joinquant_max_positions=args.joinquant_max_positions,
+        joinquant_min_position_value=args.joinquant_min_position_value,
+        joinquant_cash_buffer=args.joinquant_cash_buffer,
+        joinquant_lot_size=args.joinquant_lot_size,
     )
     print(f"input_rows={result.input_rows}")
     print(f"exported_rows={result.exported_rows}")

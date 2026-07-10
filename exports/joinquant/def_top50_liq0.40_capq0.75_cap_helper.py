@@ -6,6 +6,12 @@ import jqdata
 # read_file(path) 的 path 是相对私有空间根目录的路径。
 WEIGHTS_FILE = 'def_top50_liq0.40_capq0.75_cap_weights.csv'
 
+# 小资金实盘/模拟交易约束：可以按自己的账户规模调整。
+MAX_POSITIONS = 20
+MIN_POSITION_VALUE = 5000.0
+CASH_BUFFER = 0.02
+LOT_SIZE = 100
+
 
 def load_weights(path):
     """使用聚宽 read_file 读取 AutoTrader 导出的 date,code,weight CSV。"""
@@ -23,6 +29,51 @@ def load_weights(path):
         date, code, weight = line.split(',')
         weights.setdefault(date, {})[code] = float(weight)
     return weights
+
+
+def last_price(security):
+    """取当前价格；若当前快照不可用则退回到最近日收盘价。"""
+    try:
+        price = get_current_data()[security].last_price
+        if price and price > 0:
+            return float(price)
+    except Exception:
+        pass
+    try:
+        hist = attribute_history(security, 1, '1d', ['close'])
+        if len(hist) > 0:
+            return float(hist['close'][-1])
+    except Exception:
+        pass
+    return None
+
+
+def round_lot(amount):
+    return int(amount / LOT_SIZE) * LOT_SIZE
+
+
+def build_target_amounts(context, raw_targets):
+    """把目标权重转换成适合小资金账户的一手整数股数。"""
+    portfolio_value = context.portfolio.total_value * (1 - CASH_BUFFER)
+    ranked = sorted(raw_targets.items(), key=lambda item: item[1], reverse=True)
+    selected = ranked[:MAX_POSITIONS]
+    total_weight = sum(weight for _, weight in selected)
+    if total_weight <= 0:
+        return {}
+
+    targets = {}
+    for security, weight in selected:
+        price = last_price(security)
+        if price is None or price <= 0:
+            log.info('Skip %s: invalid price' % security)
+            continue
+        target_value = portfolio_value * weight / total_weight
+        if target_value < MIN_POSITION_VALUE:
+            continue
+        amount = round_lot(target_value / price)
+        if amount >= LOT_SIZE:
+            targets[security] = amount
+    return targets
 
 
 # 初始化函数，设定基准、复权模式和运行频率
@@ -43,24 +94,29 @@ def initialize(context):
 # 每个交易日开盘调用；只有当天在权重表中时才调仓
 def market_open(context):
     today = context.current_dt.strftime('%Y-%m-%d')
-    targets = g.weights.get(today)
-    if not targets:
+    raw_targets = g.weights.get(today)
+    if not raw_targets:
         return
 
+    target_amounts = build_target_amounts(context, raw_targets)
     current = set(context.portfolio.positions.keys())
-    target_codes = set(targets.keys())
+    target_codes = set(target_amounts.keys())
 
-    # 不在本期目标组合内的持仓清零
+    # 不在本期可交易目标组合内的持仓清零；用 order_target 按股数清仓。
     for security in current - target_codes:
-        order_target_value(security, 0)
+        position = context.portfolio.positions[security]
+        if position.closeable_amount > 0:
+            order_target(security, 0)
 
-    portfolio_value = context.portfolio.total_value
+    # 调整目标持仓。小于一手的差额不动，避免碎股/不足一手报错。
+    for security, target_amount in target_amounts.items():
+        position = context.portfolio.positions.get(security, None)
+        current_amount = position.total_amount if position else 0
+        if abs(target_amount - current_amount) < LOT_SIZE:
+            continue
+        order_target(security, target_amount)
 
-    # 按目标权重调仓：权重需换算成聚宽 order_target_value 接受的目标市值。
-    for security, weight in targets.items():
-        order_target_value(security, portfolio_value * weight)
-
-    log.info('Rebalanced %s, holdings=%d, gross_weight=%.4f' % (
-        today, len(targets), sum(targets.values())
+    log.info('Rebalanced %s, raw=%d, tradable=%d' % (
+        today, len(raw_targets), len(target_amounts)
     ))
-    record(gross_weight=sum(targets.values()), holding_count=len(targets))
+    record(holding_count=len(target_amounts))

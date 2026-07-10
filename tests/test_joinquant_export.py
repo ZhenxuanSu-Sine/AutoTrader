@@ -33,6 +33,9 @@ class JoinQuantExportTests(unittest.TestCase):
                 python_path=root / "weights.py",
                 summary_path=root / "summary.csv",
                 joinquant_weights_path="weights.csv",
+                joinquant_max_positions=8,
+                joinquant_min_position_value=3000,
+                joinquant_cash_buffer=0.05,
             )
             exported = pd.read_csv(result.csv_path)
             self.assertEqual(result.exported_rows, 2)
@@ -42,12 +45,18 @@ class JoinQuantExportTests(unittest.TestCase):
             helper = result.python_path.read_text(encoding="utf-8")
             self.assertIn("import jqdata", helper)
             self.assertIn("WEIGHTS_FILE = 'weights.csv'", helper)
+            self.assertIn("MAX_POSITIONS = 8", helper)
+            self.assertIn("MIN_POSITION_VALUE = 3000.0", helper)
+            self.assertIn("CASH_BUFFER = 0.05", helper)
+            self.assertIn("LOT_SIZE = 100", helper)
             self.assertIn("read_file(path)", helper)
             self.assertIn("raw.decode('utf-8-sig')", helper)
             self.assertIn("set_benchmark('000300.XSHG')", helper)
             self.assertIn("def market_open(context):", helper)
-            self.assertIn("context.portfolio.total_value", helper)
-            self.assertIn("order_target_value", helper)
+            self.assertIn("build_target_amounts", helper)
+            self.assertIn("round_lot", helper)
+            self.assertIn("order_target(security, target_amount)", helper)
+            self.assertNotIn("order_target_value", helper)
             self.assertNotIn("order_target_percent", helper)
             self.assertNotIn("WEIGHTS = {", helper)
 
