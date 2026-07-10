@@ -6,7 +6,7 @@ def get_env(name: str) -> str:
     load_dotenv(find_dotenv())
     v = os.getenv(name)
     if not v:
-        return None
+        return ""
         # raise RuntimeError(f"Missing env: {name}")
     return v
 

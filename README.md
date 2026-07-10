@@ -1,87 +1,165 @@
 # AutoTrader
 
-一个极简的端到端量化回测脚手架：**AKShare 拉取行情 → 统一 CSV Schema → Backtrader 回测 → 输出基础指标**。适合做低频/低算力的入门与原型验证，后续可扩展到自定义因子、数据库存储与更丰富的评估。
+面向 A 股及可扩展多资产的量化研究框架。当前版本优先打通一个可信的最小闭环：
 
-## 快速上手（Windows 11 + conda）
+`标准行情 → 策略目标仓位 → A 股约束成交 → 净值/交易记录 → 因子评测`
 
-> 需要已安装 [Anaconda](https://www.anaconda.com/products/distribution)。
+项目采用渐进式重构：新的研究内核位于 `autotrader/`，早期 AKShare 下载脚本和
+Backtrader 原型暂时保留，便于复用已有数据与对照结果。
 
-```bat
-:: 1) 创建并激活环境（Python 3.10 建议）
-conda create -n autotrader python=3.10 -y
-conda activate autotrader
+## 当前能力
 
-:: 2) 安装依赖
-conda install -c conda-forge numpy pandas matplotlib pytz joblib -y
-pip install backtrader akshare quantstats
+- 日线和分钟线共用的长表行情契约：`timestamp, symbol, open, high, low, close, volume`
+- 中文/英文供应商字段归一化及严格 OHLCV 校验
+- 多标的目标权重回测，信号在下一根 K 线开盘成交，避免最常见的未来函数
+- A 股基础约束：100 股买入单位、T+1、佣金最低收费、卖出印花税、双向滑点
+- 逐时点现金、持仓、成交和净值明细
+- 收益、年化收益、波动率、夏普和最大回撤
+- 动量、波动率基线因子，以及 Rank IC、ICIR、分位数组合收益
+- 均线和买入持有基线策略
 
-:: 3) （可选）Jupyter
-conda install -c conda-forge jupyterlab ipykernel -y
-python -m ipykernel install --user --name autotrader --display-name "Python (autotrader)"
+当前回测器定位为“研究与快速筛选”，并非实盘撮合器。涨跌停、停牌、退市、分红送转、
+期货保证金等规则会在后续执行层逐项加入。
+
+## 快速运行
+
+要求 Python 3.10+。核心仅依赖 NumPy 和 Pandas。
+
+```powershell
+python -m pip install -e .
+python -m unittest discover -s tests -v
+python -m examples.quickstart
 ```
 
-## 一把梭：从数据到回测
+数据下载和 Parquet 支持是可选依赖：
 
-1. **用 AKShare 拉日线行情 → 存 CSV（统一 6 列：`datetime, open, high, low, close, volume`）**
-
-```bash
-python data/fetch_akshare_data.py ^
-  --symbol 600519 ^
-  --start 20220101 --end 20241231 ^
-  --adjust qfq ^
-  --outfile data/sample_600519.csv
+```powershell
+python -m pip install -e ".[data]"
 ```
 
-2. **跑两个 baseline 策略（买入持有、随机交易）**
-
-```bash
-# 在仓库根目录执行
-python -m evaluation.evaluate ^
-  --data-file data/sample_600519.csv ^
-  --strategy buy_hold ^
-  --capital 100000
-
-python -m evaluation.evaluate ^
-  --data-file data/sample_600519.csv ^
-  --strategy random ^
-  --capital 100000
-```
-
-3. **看输出**
-   终端会打印期末资金、简单收益等。更多参数请看 `evaluation/evaluate.py`（手续费 `--commission`、滑点 `--slippage` 等）。
-
-> 备注：评估脚本默认把 CSV 读成 `bt.feeds.PandasData`，只要符合上面的 6 列合同，任何来源都能即插即用（AKShare/自建库导出/其它接口）。
-
-## 目录结构
-
-* `framework/`：通用基类与工具（如 `BaseStrategy`）。
-* `data/`：数据获取脚本（此处使用 AKShare）。
-* `decision/`：策略实现（如 `buy_and_hold.py`、`random_trader.py`）。
-* `evaluation/`：回测与评估 CLI（`evaluate.py`）。
-
-## 可选：本地机密管理（`.env`）
-
-本仓库的 AKShare 不需要 token；如果你后续接入需要凭据的服务，建议用 `.env`：
-
-1. 建模板：`.env.example`（示例：`FOO_TOKEN=your_token_here`）
-2. 本地复制生成 `.env`，填入真实值；`.gitignore` 忽略 `.env`
-3. 代码里用 `python-dotenv` 读取：
-
-```bash
-pip install python-dotenv
-```
+## 最小用法
 
 ```python
-from dotenv import load_dotenv, find_dotenv
-import os
-load_dotenv(find_dotenv())
-secret = os.getenv("FOO_TOKEN")
+from autotrader.backtest import BacktestConfig, PortfolioEngine
+from autotrader.strategies import moving_average_weights
+
+# bars 是长表 DataFrame，同一 timestamp 可以包含多只证券
+weights = moving_average_weights(bars, fast=5, slow=20, weight=0.8)
+result = PortfolioEngine(BacktestConfig(initial_cash=1_000_000)).run(bars, weights)
+
+print(result.metrics)
+print(result.trades.tail())
+print(result.equity.tail())
 ```
 
-## 参考
+因子研究：
 
-* **AKShare**：开源金融数据接口库，覆盖股票/期货/基金/外汇等多市场数据。使用前请阅读其文档与数据源说明：
+```python
+from autotrader.factors import evaluate_factor, momentum
 
-  * GitHub: [https://github.com/akfamily/akshare](https://github.com/akfamily/akshare)
-  * 文档: [https://akshare.xyz](https://akshare.xyz)
-* **Backtrader**：Python 回测与交易框架：[https://www.backtrader.com/](https://www.backtrader.com/)
+factor = momentum(bars, window=20)
+report = evaluate_factor(factor, bars, periods=5, quantiles=5)
+print(report.summary)
+```
+
+## 目录
+
+```text
+autotrader/
+  core/          资产、频率、费用等领域模型
+  data/          数据契约与校验
+  strategies/    生成目标仓位的策略
+  backtest/      组合成交模拟
+  factors/       因子计算和横截面评测
+  evaluation/    绩效指标
+examples/        可离线运行的端到端示例
+tests/           防未来函数、交易约束和数据质量测试
+data/, scripts/  旧版数据源与下载工具（兼容保留）
+```
+
+详细边界和后续路线见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+
+## 真实数据 baseline
+
+仓库包含一个小型、可复现的日线 baseline：下载 5 只长期上市 A 股的前复权行情，并运行
+买入持有、均线择时、时间序列动量、等权组合、趋势组合和横截面动量。
+
+```powershell
+python -m scripts.download_baseline_data
+python -m scripts.run_baselines
+```
+
+完整结果见 [BASELINE_RESULTS.md](BASELINE_RESULTS.md)。原始数据和逐策略成交/净值文件分别保存在
+`data/market/akshare_sina/stock/1d/` 与 `reports/baseline/`，默认不提交到 Git。
+
+## Rolling Window Backtest
+
+滚动评测按自然月生成 1、3、6、12、36 个月窗口，默认每月向前滚动一步。每个窗口使用独立
+现金和持仓，沿用 `PortfolioEngine` 的下一根 K 线成交、A 股费用和 T+1 逻辑，并在窗口末日
+进行带费用和滑点的终端清仓。
+
+```powershell
+python -m scripts.run_rolling_baselines
+
+# 日常快速迭代可每 3 个月取一个起点
+python -m scripts.run_rolling_baselines --step-months 3
+```
+
+输出：
+
+- `reports/rolling_baseline/windows.csv`：每个策略、每个窗口的完整指标
+- `reports/rolling_baseline/summary.csv`：所有指标的均值、中位数、标准差及 5/25/75/95 分位数
+- `reports/rolling_baseline/comparison.csv`：用于横向比较的精简列
+- [ROLLING_BASELINE_RESULTS.md](ROLLING_BASELINE_RESULTS.md)：本次真实数据结果
+
+Python API 位于 `autotrader.evaluation.rolling`。策略工厂可以读取窗口开始前的历史完成指标
+warm-up，但必须保持因果性：时间 `t` 的权重只能依赖 `t` 及以前的数据。现有 baseline 仅使用
+trailing rolling 和 `pct_change`，并由回归测试验证窗口结束后的未来数据不会改变已结束窗口。
+
+## High-Sharpe 研究候选
+
+`autotrader.strategies.high_sharpe` 提供多周期趋势、双动量轮动、防御复合、市场宽度过滤和信号
+集成。所有实现均为长仓、不加杠杆、NumPy/Pandas CPU 计算。
+
+```powershell
+# 约 47 组参数的样本内搜索；先全区间筛选，再做12个月滚动筛选
+python -m scripts.search_high_sharpe_candidates
+
+# 对选出的不同策略族进行完整 1/3/6/12/36 月 rolling 评测
+python -m scripts.run_high_sharpe_candidates
+```
+
+结果见 [HIGH_SHARPE_CANDIDATES.md](HIGH_SHARPE_CANDIDATES.md)。深度学习方向及其数据/GPU前置条件
+记录在 [TODO.md](TODO.md)，当前日线小样本不启用深度模型。
+
+## 动态选股
+
+多因子选股将股票池资格、截面评分和组合配置拆开：个股需要至少252个交易日历史并通过流动性
+和长期趋势过滤，再按20/60/120日动量、低波动和浅回撤打分，月度选择Top-N并进行逆波动配置。
+
+```powershell
+# 获取当前沪深300市值前40只的静态快照和前复权日线
+python -m scripts.download_selection_universe
+
+# 搜索均衡、动量、防御三类选股参数
+python -m scripts.search_stock_selection
+
+# 对选出的候选运行多窗口评测；默认每3个月取一个起点
+python -m scripts.run_stock_selection_candidates
+```
+
+结果见 [STOCK_SELECTION_RESULTS.md](STOCK_SELECTION_RESULTS.md)。当前Token没有Tushare历史指数成分权限，
+所以这个股票池存在幸存者偏差；正式研究必须替换成历史时点可见的成分股。
+
+## 进攻型实验
+
+进攻层支持显式1.5/2倍总敞口、负现金融资和逐日融资成本，并提供集中动量、突破和核心卫星
+候选。普通回测默认仍限制为1倍，不会自动启用杠杆。
+
+```powershell
+python -m scripts.search_aggressive_candidates
+python -m scripts.run_aggressive_candidates
+```
+
+结果见 [AGGRESSIVE_CANDIDATES.md](AGGRESSIVE_CANDIDATES.md)。当前40只静态大盘股样本中，能够满足
+年化、Sharpe和回撤约束的候选仍无法达到2%-3%的月收益中位数。

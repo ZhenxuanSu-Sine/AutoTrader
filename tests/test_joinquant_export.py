@@ -1,0 +1,45 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+
+import pandas as pd
+
+from autotrader.exporters.joinquant import csmar_symbol_to_joinquant, export_joinquant_weights
+
+
+class JoinQuantExportTests(unittest.TestCase):
+    def test_symbol_conversion(self) -> None:
+        self.assertEqual(csmar_symbol_to_joinquant("600000.SH"), "600000.XSHG")
+        self.assertEqual(csmar_symbol_to_joinquant("000001.SZ"), "000001.XSHE")
+        self.assertEqual(csmar_symbol_to_joinquant("600519"), "600519.XSHG")
+        self.assertEqual(csmar_symbol_to_joinquant("300750"), "300750.XSHE")
+        self.assertIsNone(csmar_symbol_to_joinquant("430001.BJ"))
+
+    def test_export_csv_and_python_helper(self) -> None:
+        weights = pd.DataFrame(
+            {
+                "timestamp": ["2024-01-02", "2024-01-02", "2024-02-01"],
+                "symbol": ["600000.SH", "000001.SZ", "430001.BJ"],
+                "weight": [0.6, 0.4, 1.0],
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = export_joinquant_weights(
+                weights,
+                root / "weights.csv",
+                python_path=root / "weights.py",
+                summary_path=root / "summary.csv",
+            )
+            exported = pd.read_csv(result.csv_path)
+            self.assertEqual(result.exported_rows, 2)
+            self.assertEqual(result.dropped_rows, 1)
+            self.assertEqual(exported["code"].tolist(), ["000001.XSHE", "600000.XSHG"])
+            self.assertTrue(result.python_path and result.python_path.exists())
+            self.assertIn("order_target_percent", result.python_path.read_text())
+
+
+if __name__ == "__main__":
+    unittest.main()
