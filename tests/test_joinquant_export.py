@@ -38,7 +38,11 @@ class JoinQuantExportTests(unittest.TestCase):
             self.assertEqual(result.dropped_rows, 1)
             self.assertEqual(exported["code"].tolist(), ["000001.XSHE", "600000.XSHG"])
             self.assertTrue(result.python_path and result.python_path.exists())
-            self.assertIn("order_target_percent", result.python_path.read_text())
+            helper = result.python_path.read_text(encoding="utf-8")
+            self.assertIn("import jqdata", helper)
+            self.assertIn("set_benchmark('000300.XSHG')", helper)
+            self.assertIn("def market_open(context):", helper)
+            self.assertIn("order_target_percent", helper)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from pprint import pformat
 
 import pandas as pd
 
@@ -127,24 +128,43 @@ def _joinquant_python_template(exported: pd.DataFrame) -> str:
         }
         for date, group in exported.groupby("date", sort=True)
     }
+    weights_literal = pformat(grouped, width=100, sort_dicts=True)
     return (
-        '"""JoinQuant helper generated from AutoTrader target weights.\n\n'
-        "Usage inside JoinQuant:\n"
-        "1. Paste this file into a strategy or import the WEIGHTS mapping.\n"
-        "2. Call rebalance(context) once per trading day.\n"
-        '"""\n\n'
-        f"WEIGHTS = {grouped!r}\n\n"
+        "# 导入聚宽函数库\n"
+        "import jqdata\n\n\n"
+        "# AutoTrader 导出的目标权重。\n"
+        "# key 为调仓日期 YYYY-MM-DD，value 为 {聚宽证券代码: 目标仓位权重}。\n"
+        f"WEIGHTS = {weights_literal}\n\n\n"
+        "# 初始化函数，设定基准、复权模式和运行频率\n"
         "def initialize(context):\n"
-        "    run_daily(rebalance, time='open')\n\n\n"
-        "def rebalance(context):\n"
+        "    # 沪深300作为默认基准，可按需要改成 000905.XSHG / 000852.XSHG 等\n"
+        "    set_benchmark('000300.XSHG')\n"
+        "    # 开启动态复权模式（真实价格）\n"
+        "    set_option('use_real_price', True)\n"
+        "    # 保存权重表到全局变量，贴合聚宽常见写法\n"
+        "    g.weights = WEIGHTS\n"
+        "    # 日频策略：每天开盘检查当天是否为调仓日\n"
+        "    run_daily(market_open, time='open')\n\n\n"
+        "# 每个交易日开盘调用；只有当天在权重表中时才调仓\n"
+        "def market_open(context):\n"
         "    today = context.current_dt.strftime('%Y-%m-%d')\n"
-        "    targets = WEIGHTS.get(today)\n"
+        "    targets = g.weights.get(today)\n"
         "    if not targets:\n"
         "        return\n"
+        "\n"
         "    current = set(context.portfolio.positions.keys())\n"
         "    target_codes = set(targets.keys())\n"
+        "\n"
+        "    # 不在本期目标组合内的持仓清零\n"
         "    for security in current - target_codes:\n"
         "        order_target_percent(security, 0)\n"
+        "\n"
+        "    # 按目标权重调仓\n"
         "    for security, weight in targets.items():\n"
         "        order_target_percent(security, weight)\n"
+        "\n"
+        "    log.info('Rebalanced %s, holdings=%d, gross_weight=%.4f' % (\n"
+        "        today, len(targets), sum(targets.values())\n"
+        "    ))\n"
+        "    record(gross_weight=sum(targets.values()), holding_count=len(targets))\n"
     )
