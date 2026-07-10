@@ -32,6 +32,7 @@ class JoinQuantExportTests(unittest.TestCase):
                 root / "weights.csv",
                 python_path=root / "weights.py",
                 summary_path=root / "summary.csv",
+                joinquant_weights_path="weights.csv",
             )
             exported = pd.read_csv(result.csv_path)
             self.assertEqual(result.exported_rows, 2)
@@ -40,11 +41,15 @@ class JoinQuantExportTests(unittest.TestCase):
             self.assertTrue(result.python_path and result.python_path.exists())
             helper = result.python_path.read_text(encoding="utf-8")
             self.assertIn("import jqdata", helper)
+            self.assertIn("WEIGHTS_FILE = 'weights.csv'", helper)
+            self.assertIn("read_file(path)", helper)
+            self.assertIn("raw.decode('utf-8-sig')", helper)
             self.assertIn("set_benchmark('000300.XSHG')", helper)
             self.assertIn("def market_open(context):", helper)
             self.assertIn("context.portfolio.total_value", helper)
             self.assertIn("order_target_value", helper)
             self.assertNotIn("order_target_percent", helper)
+            self.assertNotIn("WEIGHTS = {", helper)
 
 
 if __name__ == "__main__":

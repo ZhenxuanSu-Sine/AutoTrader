@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from pprint import pformat
 
 import pandas as pd
 
@@ -29,7 +28,6 @@ def csmar_symbol_to_joinquant(symbol: str, *, include_unsupported: bool = False)
     - ``600000.SH`` -> ``600000.XSHG``
     - ``000001.SZ`` -> ``000001.XSHE``
 
-    JoinQuant's public stock examples and docs use ``.XSHG`` and ``.XSHE``.
     North Exchange symbols are returned only when ``include_unsupported`` is
     true, because they may not be usable in all JoinQuant environments.
     """
@@ -57,17 +55,20 @@ def export_joinquant_weights(
     *,
     python_path: str | Path | None = None,
     summary_path: str | Path | None = None,
+    joinquant_weights_path: str | None = None,
     include_unsupported: bool = False,
     min_weight: float = 0.0,
 ) -> JoinQuantExportResult:
     """Export ``timestamp/symbol/weight`` rows as JoinQuant target weights.
 
-    The CSV schema is intentionally minimal and stable:
+    CSV schema:
 
     - ``date``: rebalance date, ``YYYY-MM-DD``
     - ``code``: JoinQuant security code, such as ``600519.XSHG``
-    - ``weight``: target portfolio weight. Generated helpers convert this to
-      ``order_target_value(security, context.portfolio.total_value * weight)``.
+    - ``weight``: target portfolio weight
+
+    Generated JoinQuant helpers read this CSV through ``read_file(path)`` and
+    submit target values with ``order_target_value``.
     """
 
     required = {"timestamp", "symbol", "weight"}
@@ -98,9 +99,12 @@ def export_joinquant_weights(
     py_output = Path(python_path) if python_path is not None else None
     if py_output is not None:
         py_output.parent.mkdir(parents=True, exist_ok=True)
-        py_output.write_text(_joinquant_python_template(exported), encoding="utf-8")
+        private_path = joinquant_weights_path or csv_output.name
+        py_output.write_text(_joinquant_python_template(private_path), encoding="utf-8")
 
-    summary_output = Path(summary_path) if summary_path is not None else csv_output.with_suffix(".summary.csv")
+    summary_output = (
+        Path(summary_path) if summary_path is not None else csv_output.with_suffix(".summary.csv")
+    )
     summary_output.parent.mkdir(parents=True, exist_ok=True)
     summary = (
         exported.groupby("date")
@@ -121,29 +125,40 @@ def export_joinquant_weights(
     )
 
 
-def _joinquant_python_template(exported: pd.DataFrame) -> str:
-    grouped = {
-        date: {
-            row.code: round(float(row.weight), 12)
-            for row in group.itertuples(index=False)
-        }
-        for date, group in exported.groupby("date", sort=True)
-    }
-    weights_literal = pformat(grouped, width=100, sort_dicts=True)
+def _joinquant_python_template(joinquant_weights_path: str) -> str:
     return (
         "# 导入聚宽函数库\n"
         "import jqdata\n\n\n"
-        "# AutoTrader 导出的目标权重。\n"
-        "# key 为调仓日期 YYYY-MM-DD，value 为 {聚宽证券代码: 目标仓位权重}。\n"
-        f"WEIGHTS = {weights_literal}\n\n\n"
+        "# 权重 CSV 文件路径，需先上传到聚宽「研究」模块的私有文件空间。\n"
+        "# read_file(path) 的 path 是相对私有空间根目录的路径。\n"
+        f"WEIGHTS_FILE = {joinquant_weights_path!r}\n\n\n"
+        "def load_weights(path):\n"
+        "    \"\"\"使用聚宽 read_file 读取 AutoTrader 导出的 date,code,weight CSV。\"\"\"\n"
+        "    raw = read_file(path)\n"
+        "    if isinstance(raw, bytes):\n"
+        "        text = raw.decode('utf-8-sig')\n"
+        "    else:\n"
+        "        text = raw\n"
+        "\n"
+        "    rows = text.strip().splitlines()\n"
+        "    weights = {}\n"
+        "    for line in rows[1:]:\n"
+        "        if not line.strip():\n"
+        "            continue\n"
+        "        date, code, weight = line.split(',')\n"
+        "        weights.setdefault(date, {})[code] = float(weight)\n"
+        "    return weights\n\n\n"
         "# 初始化函数，设定基准、复权模式和运行频率\n"
         "def initialize(context):\n"
         "    # 沪深300作为默认基准，可按需要改成 000905.XSHG / 000852.XSHG 等\n"
         "    set_benchmark('000300.XSHG')\n"
         "    # 开启动态复权模式（真实价格）\n"
         "    set_option('use_real_price', True)\n"
-        "    # 保存权重表到全局变量，贴合聚宽常见写法\n"
-        "    g.weights = WEIGHTS\n"
+        "    # 读取私有文件中的目标权重\n"
+        "    g.weights = load_weights(WEIGHTS_FILE)\n"
+        "    log.info('Loaded target weights from %s, rebalance_days=%d' % (\n"
+        "        WEIGHTS_FILE, len(g.weights)\n"
+        "    ))\n"
         "    # 日频策略：每天开盘检查当天是否为调仓日\n"
         "    run_daily(market_open, time='open')\n\n\n"
         "# 每个交易日开盘调用；只有当天在权重表中时才调仓\n"

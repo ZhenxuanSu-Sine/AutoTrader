@@ -21,7 +21,14 @@ def main() -> None:
     parser.add_argument("--output-csv", required=True, help="JoinQuant CSV output path")
     parser.add_argument(
         "--output-python",
-        help="optional JoinQuant helper .py with embedded WEIGHTS mapping",
+        help="optional JoinQuant helper .py that reads the CSV through read_file",
+    )
+    parser.add_argument(
+        "--joinquant-weights-path",
+        help=(
+            "relative path of the uploaded CSV in JoinQuant private files; "
+            "defaults to the output CSV file name"
+        ),
     )
     parser.add_argument(
         "--summary",
@@ -46,6 +53,7 @@ def main() -> None:
         args.output_csv,
         python_path=args.output_python,
         summary_path=args.summary,
+        joinquant_weights_path=args.joinquant_weights_path,
         include_unsupported=args.include_unsupported,
         min_weight=args.min_weight,
     )
