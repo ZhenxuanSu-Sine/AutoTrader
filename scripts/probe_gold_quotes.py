@@ -70,6 +70,10 @@ def main():
         json.dump(output,f,ensure_ascii=False,indent=2)
     print(json.dumps({k:v for k,v in output.items() if k != "discovered_endpoints"},ensure_ascii=False,indent=2))
     print("NOTE: HTTP 200 does not establish that quotes are live, two-sided, or executable.")
+    if not files:
+        raise SystemExit("Probe inconclusive: upstream source files not discovered")
+    if not output["checks"]:
+        raise SystemExit("Probe inconclusive: no eligible HTTPS endpoints tested")
 
 if __name__ == "__main__":
     main()
