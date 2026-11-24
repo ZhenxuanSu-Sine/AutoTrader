@@ -26,7 +26,12 @@ def fetch(url, *, timeout=15, method="GET", data=None, headers=None):
 
 def main():
     output = {"checked_at_utc": datetime.now(timezone.utc).isoformat(), "source_repo": REPO, "banks": TARGET_BANKS, "checks": []}
-    api = fetch(f"https://api.github.com/repos/{REPO}/git/trees/HEAD?recursive=1")
+    meta = fetch(f"https://api.github.com/repos/{REPO}")
+    default_branch = "main"
+    if meta.get("status") == 200:
+        default_branch = json.loads(meta["body"]).get("default_branch", "main")
+    output["upstream_default_branch"] = default_branch
+    api = fetch(f"https://api.github.com/repos/{REPO}/git/trees/{default_branch}?recursive=1")
     files = []
     if api.get("status") == 200:
         try:
@@ -34,10 +39,13 @@ def main():
         except Exception as exc:
             output["tree_parse_error"] = str(exc)
     output["source_tree_status"] = api.get("status")
+    output["source_tree_error"] = api.get("error")
+    if not files:
+        output["warning"] = "No upstream JavaScript source files discovered; this is not a successful endpoint verification"
     output["source_files"] = files
     endpoints = {}
     for path in files:
-        raw = "https://raw.githubusercontent.com/" + REPO + "/HEAD/" + urllib.parse.quote(path)
+        raw = "https://raw.githubusercontent.com/" + REPO + "/" + default_branch + "/" + urllib.parse.quote(path)
         src = fetch(raw)
         if src.get("status") != 200:
             continue
