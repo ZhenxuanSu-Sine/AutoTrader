@@ -1,0 +1,27 @@
+name: Probe bank gold quote sources
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/gold-accumulation-mvp]
+    paths:
+      - '.github/workflows/gold-quote-probe.yml'
+      - 'scripts/probe_gold_quotes.py'
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Probe public source endpoints
+        run: python scripts/probe_gold_quotes.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gold-quote-probe
+          path: artifacts/gold_quote_probe.json
+          if-no-files-found: warn
