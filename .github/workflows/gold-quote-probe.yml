@@ -17,6 +17,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Clone public upstream without REST API
+        run: git clone --depth 1 https://github.com/zhou2533/GoldAccumulationRealTimeMonitor.git upstream-gold-monitor
       - name: Probe public source endpoints
         run: python scripts/probe_gold_quotes.py
       - uses: actions/upload-artifact@v4
