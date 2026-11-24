@@ -1,0 +1,29 @@
+name: Gold daily research backtest
+on:
+  push:
+    branches: [feature/gold-accumulation-mvp]
+    paths:
+      - 'scripts/backtest_gold_daily.py'
+      - '.github/workflows/gold-daily-backtest.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install data dependencies
+        run: pip install 'akshare>=1.14' 'pandas>=2.1' 'numpy>=1.26'
+      - name: Fetch real Au99.99 history and run proxy backtest
+        run: python scripts/backtest_gold_daily.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gold-daily-backtest
+          path: artifacts/gold_backtest/
+          if-no-files-found: warn
