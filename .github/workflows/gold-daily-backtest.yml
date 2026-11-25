@@ -23,7 +23,7 @@ jobs:
       - name: Fetch real Au99.99 history and run proxy backtest
         run: python scripts/backtest_gold_daily.py
       - name: Compare secretary observation fractions on the SAME real daily data
-        run: python scripts/backtest_gold_secretary.py --csv artifacts/gold_backtest/au9999_daily.csv
+        run: python -m scripts.backtest_gold_secretary --csv artifacts/gold_backtest/au9999_daily.csv
       - uses: actions/upload-artifact@v4
         if: always()
         with:
