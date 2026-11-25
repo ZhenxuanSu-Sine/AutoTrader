@@ -34,6 +34,7 @@ def secretary_backtest(df, buy_window=30, sell_window=30, buy_fraction=.37,
     cash, grams, halted = float(initial), 0., False
     phase, start, entry = "buy", 0, None
     observations, trades, curve = [], [], []
+    pending = None
     half = spread_per_gram / 2
     for i, r in enumerate(df.itertuples(index=False)):
         op, cl = float(r.open), float(r.close)
@@ -53,19 +54,10 @@ def secretary_backtest(df, buy_window=30, sell_window=30, buy_fraction=.37,
                 action, reason = "SELL", "stop_loss"
             elif take_profit is not None and pnl >= take_profit:
                 action, reason = "SELL", "take_profit"
-        if action is None and not halted:
-            w = buy_window if phase == "buy" else sell_window
-            f = buy_fraction if phase == "buy" else sell_fraction
-            elapsed = i - start
-            k = max(1, min(w-1, math.ceil(w*f)))
-            if elapsed >= k:
-                # All reference prices are prior-session opens, never future data.
-                ref = min(observations) if phase == "buy" else max(observations)
-                is_record = op < ref if phase == "buy" else op > ref
-                if is_record:
-                    action, reason = ("BUY" if phase == "buy" else "SELL"), "record"
-            if action is None and elapsed == w-1:
-                action, reason = ("BUY" if phase == "buy" else "SELL"), "window_expiry"
+        # A current-session open can only trigger a NEXT-session fill.
+        if action is None and not halted and pending is not None:
+            action, reason = pending
+        pending = None
         if action == "BUY" and grams == 0:
             # Account warning: cap exposure at 25% of equity.
             weight = min(max_weight, .25) if loss >= .15 else max_weight
@@ -83,7 +75,18 @@ def secretary_backtest(df, buy_window=30, sell_window=30, buy_fraction=.37,
             cash += grams * bid
             grams, entry = 0., None
             phase, start, observations = "buy", i+1, []
-        if i >= start:
+        if i >= start and not halted:
+            w = buy_window if phase == "buy" else sell_window
+            f = buy_fraction if phase == "buy" else sell_fraction
+            elapsed = i - start
+            k = max(1, min(w-1, math.ceil(w*f)))
+            if elapsed >= k:
+                ref = min(observations) if phase == "buy" else max(observations)
+                is_record = op < ref if phase == "buy" else op > ref
+                if is_record:
+                    pending = ("BUY" if phase == "buy" else "SELL", "record")
+            if pending is None and elapsed == w-1:
+                pending = ("BUY" if phase == "buy" else "SELL", "window_expiry")
             observations.append(op)
         curve.append({"date":r.date,"equity":cash + grams*(cl-half),
                       "cash":cash,"grams":grams,"phase":phase,"halted":halted})
@@ -106,7 +109,7 @@ def secretary_backtest(df, buy_window=30, sell_window=30, buy_fraction=.37,
                "take_profit":take_profit,"halted":halted,
                "spread_per_gram":spread_per_gram,
                "data_type":"SGE Au99.99 daily proxy; NOT verified bank minute quotes",
-               "execution":"decide and execute at daily open; forced final-window open"}
+               "execution":"observe current open, execute at NEXT session open"}
     return curve, trades, metrics
 
 
