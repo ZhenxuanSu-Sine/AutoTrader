@@ -96,14 +96,14 @@ def backtest(df: pd.DataFrame, initial=20000.0, spread_per_gram=3.8,
         elif desired < current-100 or (target == 0 and grams > 1e-10):
             qty = min(grams, (current-desired)/sell)
             cash += qty*sell; grams -= qty
-            trades.append({"date":str(r.date.date()),"action":"SELL","grams":qty,"price":sell})
+            trades.append({"date":str(r.date.date()),"action":"SELL","grams":qty,"price":sell,"reason":exit_reason or "target_rebalance"})
         equity = cash+grams*(r.close-half)
         records.append({"date":r.date,"equity":equity,"cash":cash,"grams":grams,
                         "target":target,"close":r.close,"halted":halted})
     curve = pd.DataFrame(records)
     ret = curve.equity.pct_change().fillna(0)
     years = max((curve.date.iloc[-1]-curve.date.iloc[0]).days/365.25,1/365.25)
-    peak = curve.equity.cummax()
+    peak = curve.equity.cummax().clip(lower=initial)
     drawdown = curve.equity/peak-1
     annvol = float(ret.std(ddof=0)*np.sqrt(252))
     metrics = {"bars":len(curve),"start":str(curve.date.iloc[0].date()),
