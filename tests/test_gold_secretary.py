@@ -19,8 +19,8 @@ class SecretaryTests(unittest.TestCase):
         self.assertEqual(trades.iloc[0].reason,"window_expiry")
         self.assertEqual(trades.iloc[1].action,"SELL")
         self.assertEqual(trades.iloc[1].reason,"window_expiry")
-        self.assertEqual(trades.iloc[0].date,"2024-02-12") # next open after final buy-window session
-        self.assertEqual(trades.iloc[1].date,"2024-03-26") # next open after final sell-window session
+        self.assertEqual(trades.iloc[0].date,"2024-02-09") # last open inside 30-session buy window
+        self.assertEqual(trades.iloc[1].date,"2024-03-22") # last open inside 30-session sell window
 
     def test_record_buy_after_observation(self):
         prices=[500]*12+[499]+[500]*55
