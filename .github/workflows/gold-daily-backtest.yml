@@ -4,6 +4,7 @@ on:
     branches: [feature/gold-accumulation-mvp]
     paths:
       - 'scripts/backtest_gold_daily.py'
+      - 'scripts/backtest_gold_secretary.py'
       - '.github/workflows/gold-daily-backtest.yml'
   workflow_dispatch:
 permissions:
@@ -21,9 +22,13 @@ jobs:
         run: pip install 'akshare>=1.14' 'pandas>=2.1' 'numpy>=1.26'
       - name: Fetch real Au99.99 history and run proxy backtest
         run: python scripts/backtest_gold_daily.py
+      - name: Compare secretary observation fractions on the SAME real daily data
+        run: python scripts/backtest_gold_secretary.py --csv artifacts/gold_backtest/au9999_daily.csv
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: gold-daily-backtest
-          path: artifacts/gold_backtest/
+          path: |
+            artifacts/gold_backtest/
+            artifacts/gold_secretary/
           if-no-files-found: warn
