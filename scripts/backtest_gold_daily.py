@@ -89,9 +89,11 @@ def backtest(df: pd.DataFrame, initial=20000.0, spread_per_gram=3.8,
             if qty*buy >= 100:
                 if grams < 1e-10:
                     entry_date, entry_price = r.date, buy
+                else:
+                    entry_price = (grams * entry_price + qty * buy) / (grams + qty)
                 cash -= qty*buy; grams += qty
                 trades.append({"date":str(r.date.date()),"action":"BUY","grams":qty,"price":buy})
-        elif desired < current-100:
+        elif desired < current-100 or (target == 0 and grams > 1e-10):
             qty = min(grams, (current-desired)/sell)
             cash += qty*sell; grams -= qty
             trades.append({"date":str(r.date.date()),"action":"SELL","grams":qty,"price":sell})
