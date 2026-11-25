@@ -19,15 +19,15 @@ class SecretaryTests(unittest.TestCase):
         self.assertEqual(trades.iloc[0].reason,"window_expiry")
         self.assertEqual(trades.iloc[1].action,"SELL")
         self.assertEqual(trades.iloc[1].reason,"window_expiry")
-        self.assertEqual(trades.iloc[0].date,"2024-02-09") # session 30
-        self.assertEqual(trades.iloc[1].date,"2024-03-22") # session 60
+        self.assertEqual(trades.iloc[0].date,"2024-02-12") # next open after final buy-window session
+        self.assertEqual(trades.iloc[1].date,"2024-03-26") # next open after final sell-window session
 
     def test_record_buy_after_observation(self):
         prices=[500]*12+[499]+[500]*55
         _,trades,_=secretary_backtest(self.bars(prices))
         self.assertEqual(trades.iloc[0].action,"BUY")
         self.assertEqual(trades.iloc[0].reason,"record")
-        self.assertEqual(trades.iloc[0].date,"2024-01-17")
+        self.assertEqual(trades.iloc[0].date,"2024-01-18")
 
     def test_future_prices_do_not_change_past_actions(self):
         a=self.bars([500]*90)
