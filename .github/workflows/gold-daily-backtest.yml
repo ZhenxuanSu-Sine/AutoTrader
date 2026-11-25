@@ -1,5 +1,6 @@
 name: Gold daily research backtest
 on:
+  pull_request:
   push:
     branches: [feature/gold-accumulation-mvp]
     paths:
