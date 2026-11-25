@@ -163,8 +163,8 @@ def main():
             "selection_metric":"train_sharpe_rf0",
             "selected_buy_fraction":chosen_pair[0],
             "selected_sell_fraction":chosen_pair[1],
-            "selected_train_metrics":chosen[["train_total_return","train_max_drawdown","train_sharpe_rf0","train_trade_count"]].to_dict(),
-            "selected_heldout_metrics":chosen[["test_total_return","test_max_drawdown","test_sharpe_rf0","test_trade_count"]].to_dict(),
+            "selected_train_metrics":{k:float(v) for k,v in chosen[["train_total_return","train_max_drawdown","train_sharpe_rf0","train_trade_count"]].items()},
+            "selected_heldout_metrics":{k:float(v) for k,v in chosen[["test_total_return","test_max_drawdown","test_sharpe_rf0","test_trade_count"]].items()},
             "note":"Holdout starts flat and may have a different exposure than a continuous live strategy; no bank quote validation."}
     for label,pair in (("classic37",baseline_pair),("selected",chosen_pair)):
         curve,trades,m=secretary_backtest(
