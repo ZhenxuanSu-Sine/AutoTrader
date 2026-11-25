@@ -85,7 +85,7 @@ def secretary_backtest(df, buy_window=30, sell_window=30, buy_fraction=.37,
                 is_record = op < ref if phase == "buy" else op > ref
                 if is_record:
                     pending = ("BUY" if phase == "buy" else "SELL", "record")
-            if pending is None and elapsed == w-1:
+            if pending is None and elapsed == w-2:
                 pending = ("BUY" if phase == "buy" else "SELL", "window_expiry")
             observations.append(op)
         curve.append({"date":r.date,"equity":cash + grams*(cl-half),
@@ -109,7 +109,7 @@ def secretary_backtest(df, buy_window=30, sell_window=30, buy_fraction=.37,
                "take_profit":take_profit,"halted":halted,
                "spread_per_gram":spread_per_gram,
                "data_type":"SGE Au99.99 daily proxy; NOT verified bank minute quotes",
-               "execution":"observe current open, execute at NEXT session open"}
+               "execution":"observe open; next-session fill; expiry decision penultimate session to ensure final-window open exit"}
     return curve, trades, metrics
 
 
