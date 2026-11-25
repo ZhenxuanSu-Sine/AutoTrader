@@ -1,5 +1,12 @@
 name: Gold strategy unit tests
 on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'scripts/backtest_gold_*.py'
+      - 'autotrader/gold/**'
+      - 'tests/test_gold_*.py'
+      - '.github/workflows/gold-strategy-tests.yml'
   push:
     branches: [feature/gold-accumulation-mvp]
     paths:
@@ -7,6 +14,8 @@ on:
       - 'scripts/backtest_gold_secretary.py'
       - 'tests/test_gold_daily_backtest.py'
       - 'tests/test_gold_secretary.py'
+      - 'tests/test_gold_advisor.py'
+      - 'autotrader/gold/**'
       - '.github/workflows/gold-strategy-tests.yml'
   workflow_dispatch:
 permissions:
