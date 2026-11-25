@@ -122,21 +122,61 @@ def main():
     df=load_data(args.csv)
     out=Path(args.out);out.mkdir(parents=True,exist_ok=True)
     df.to_csv(out/"au9999_daily.csv",index=False)
+    # Joint 8x8 scan: buy and sell observation fractions are independent.
+    fractions=(.1,.2,.3,.37,.4,.5,.6,.7)
     results=[]
-    # The 37% rule is a hypothesis, not an assumed optimum.
-    for f in (.1,.2,.3,.37,.4,.5,.6,.7):
+    # Fixed chronological split; no parameter selection using the test period.
+    split=max(70,int(len(df)*.7))
+    train=df.iloc[:split].copy()
+    test=df.iloc[split:].copy()
+    if len(test)<60:
+        raise ValueError("at least 60 held-out bars required for validation")
+    for buy_f in fractions:
+        for sell_f in fractions:
+            _,_,train_m=secretary_backtest(
+                train,buy_window=args.buy_window,sell_window=args.sell_window,
+                buy_fraction=buy_f,sell_fraction=sell_f,
+                stop_loss=args.stop_loss,take_profit=args.take_profit)
+            _,_,test_m=secretary_backtest(
+                test,buy_window=args.buy_window,sell_window=args.sell_window,
+                buy_fraction=buy_f,sell_fraction=sell_f,
+                stop_loss=args.stop_loss,take_profit=args.take_profit)
+            results.append({
+                "buy_fraction":buy_f,"sell_fraction":sell_f,
+                "train_total_return":train_m["total_return"],
+                "train_max_drawdown":train_m["max_drawdown"],
+                "train_sharpe_rf0":train_m["sharpe_rf0"],
+                "train_trade_count":train_m["trade_count"],
+                "test_total_return":test_m["total_return"],
+                "test_max_drawdown":test_m["max_drawdown"],
+                "test_sharpe_rf0":test_m["sharpe_rf0"],
+                "test_trade_count":test_m["trade_count"]})
+    table=pd.DataFrame(results)
+    table.to_csv(out/"fraction_grid_64_train_test.csv",index=False)
+    # Select by train-only Sharpe; report holdout without further tuning.
+    ranked=table.sort_values("train_sharpe_rf0",ascending=False,na_position="last")
+    chosen=ranked.iloc[0]
+    chosen_pair=(float(chosen.buy_fraction),float(chosen.sell_fraction))
+    baseline_pair=(.37,.37)
+    report={"train_end":str(train.date.iloc[-1].date()),
+            "test_start":str(test.date.iloc[0].date()),
+            "selection_metric":"train_sharpe_rf0",
+            "selected_buy_fraction":chosen_pair[0],
+            "selected_sell_fraction":chosen_pair[1],
+            "selected_train_metrics":chosen[["train_total_return","train_max_drawdown","train_sharpe_rf0","train_trade_count"]].to_dict(),
+            "selected_heldout_metrics":chosen[["test_total_return","test_max_drawdown","test_sharpe_rf0","test_trade_count"]].to_dict(),
+            "note":"Holdout starts flat and may have a different exposure than a continuous live strategy; no bank quote validation."}
+    for label,pair in (("classic37",baseline_pair),("selected",chosen_pair)):
         curve,trades,m=secretary_backtest(
             df,buy_window=args.buy_window,sell_window=args.sell_window,
-            buy_fraction=f,sell_fraction=f,stop_loss=args.stop_loss,
-            take_profit=args.take_profit)
-        results.append(m)
-        if f == .37:
-            curve.to_csv(out/"equity_curve_37pct.csv",index=False)
-            trades.to_csv(out/"trades_37pct.csv",index=False)
-    pd.DataFrame(results).to_csv(out/"fraction_comparison.csv",index=False)
-    (out/"metrics.json").write_text(json.dumps(results,ensure_ascii=False,indent=2),
-                                    encoding="utf-8")
-    print(json.dumps(results,ensure_ascii=False,indent=2))
+            buy_fraction=pair[0],sell_fraction=pair[1],
+            stop_loss=args.stop_loss,take_profit=args.take_profit)
+        curve.to_csv(out/f"equity_curve_{label}.csv",index=False)
+        trades.to_csv(out/f"trades_{label}.csv",index=False)
+        report[f"full_sample_{label}"]=m
+    (out/"scan_report.json").write_text(
+        json.dumps(report,ensure_ascii=False,indent=2),encoding="utf-8")
+    print(json.dumps(report,ensure_ascii=False,indent=2))
 
 
 if __name__=="__main__":
