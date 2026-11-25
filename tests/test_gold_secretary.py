@@ -23,11 +23,11 @@ class SecretaryTests(unittest.TestCase):
         self.assertEqual(trades.iloc[1].date,"2024-03-22") # session 60
 
     def test_record_buy_after_observation(self):
-        prices=[500]*11+[499]+[500]*55
+        prices=[500]*12+[499]+[500]*55
         _,trades,_=secretary_backtest(self.bars(prices))
         self.assertEqual(trades.iloc[0].action,"BUY")
         self.assertEqual(trades.iloc[0].reason,"record")
-        self.assertEqual(trades.iloc[0].date,"2024-01-16")
+        self.assertEqual(trades.iloc[0].date,"2024-01-17")
 
     def test_future_prices_do_not_change_past_actions(self):
         a=self.bars([500]*90)
