@@ -1,5 +1,6 @@
 name: Probe bank gold quote sources
 on:
+  pull_request:
   workflow_dispatch:
   push:
     branches: [feature/gold-accumulation-mvp]
