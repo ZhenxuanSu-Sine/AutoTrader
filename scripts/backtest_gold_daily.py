@@ -37,8 +37,14 @@ def load_data(path: str | None) -> pd.DataFrame:
     return normalize_sge(ak.spot_hist_sge(symbol="Au99.99"))
 
 def backtest(df: pd.DataFrame, initial=20000.0, spread_per_gram=3.8,
-             max_weight=0.8, fast=20, slow=60, execution_lag=1):
+             max_weight=0.8, fast=20, slow=60, execution_lag=1,
+             max_holding_days=None, take_profit=None, stop_loss=None):
     if execution_lag < 1: raise ValueError("execution must lag signal at least one bar")
+    if max_holding_days is not None and max_holding_days < 1:
+        raise ValueError('max_holding_days must be positive')
+    for name, value in [('take_profit', take_profit), ('stop_loss', stop_loss)]:
+        if value is not None and not (0 < value < 1):
+            raise ValueError(f'{name} must be between 0 and 1')
     d = df.copy()
     d["ma_fast"] = d.close.rolling(fast).mean()
     d["ma_slow"] = d.close.rolling(slow).mean()
@@ -46,6 +52,8 @@ def backtest(df: pd.DataFrame, initial=20000.0, spread_per_gram=3.8,
     d.loc[d.ma_slow.isna(), "target"] = 0.0
     d["execution_target"] = d.target.shift(execution_lag).fillna(0.0)
     cash, grams, halted = initial, 0.0, False
+    entry_date, entry_price = None, None
+    exit_reasons = {'max_holding_days':0, 'take_profit':0, 'stop_loss':0}
     records, trades = [], []
     # The official Xingye 3.8 CNY/g roundtrip spread is represented symmetrically.
     # Proxy assumption, not a verified Alipay bank minute quote.
@@ -59,11 +67,28 @@ def backtest(df: pd.DataFrame, initial=20000.0, spread_per_gram=3.8,
         if loss >= .25: halted, target = True, 0.0
         elif loss >= .20: target = 0.0
         elif loss >= .15: target = min(target, .25)
+        # Exit conditions use the current session OPEN only: no intraday
+        # high/low assumption and no same-day close lookahead.
+        exit_reason = None
+        if grams > 1e-10 and entry_date is not None:
+            holding_days = (r.date - entry_date).days
+            pnl = sell / entry_price - 1
+            if stop_loss is not None and pnl <= -stop_loss:
+                exit_reason = 'stop_loss'
+            elif take_profit is not None and pnl >= take_profit:
+                exit_reason = 'take_profit'
+            elif max_holding_days is not None and holding_days >= max_holding_days:
+                exit_reason = 'max_holding_days'
+        if exit_reason:
+            target = 0.0
+            exit_reasons[exit_reason] += 1
         desired = equity_before*target
         current = grams*sell
         if desired > current+100 and not halted:
             qty = min(cash/buy, (desired-current)/buy)
             if qty*buy >= 100:
+                if grams < 1e-10:
+                    entry_date, entry_price = r.date, buy
                 cash -= qty*buy; grams += qty
                 trades.append({"date":str(r.date.date()),"action":"BUY","grams":qty,"price":buy})
         elif desired < current-100:
@@ -88,6 +113,8 @@ def backtest(df: pd.DataFrame, initial=20000.0, spread_per_gram=3.8,
                "annual_volatility":round(annvol,6),
                "sharpe_rf0":round(float(ret.mean()*252/annvol),6) if annvol else None,
                "trade_count":len(trades),"halted":halted,
+               "max_holding_days":max_holding_days,"take_profit":take_profit,
+               "stop_loss":stop_loss,"exit_reasons":exit_reasons,
                "proxy_spread_cny_per_gram":spread_per_gram,
                "data_type":"Au99.99 daily market proxy; NOT bank minute quotes",
                "execution":"signal close, earliest next session open"}
