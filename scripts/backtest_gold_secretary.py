@@ -16,7 +16,8 @@ from scripts.backtest_gold_daily import load_data
 
 def secretary_backtest(df, buy_window=30, sell_window=30, buy_fraction=.37,
                        sell_fraction=.37, spread_per_gram=3.8, initial=20000.,
-                       max_weight=.8, stop_loss=None, take_profit=None):
+                       max_weight=.8, stop_loss=None, take_profit=None,
+                       force_buy=True, force_sell=True):
     for w in (buy_window, sell_window):
         if not isinstance(w, int) or w < 2:
             raise ValueError("windows must be integers >= 2")
@@ -35,6 +36,7 @@ def secretary_backtest(df, buy_window=30, sell_window=30, buy_fraction=.37,
     phase, start, entry = "buy", 0, None
     observations, trades, curve = [], [], []
     pending = None
+    skipped_buy = skipped_sell = 0
     half = spread_per_gram / 2
     for i, r in enumerate(df.itertuples(index=False)):
         op, cl = float(r.open), float(r.close)
@@ -58,6 +60,8 @@ def secretary_backtest(df, buy_window=30, sell_window=30, buy_fraction=.37,
         if action is None and not halted and pending is not None:
             action, reason = pending
         pending = None
+        if i == len(df)-1:
+            action, reason = ("SELL", "evaluation_end") if grams > 0 else (None, None)
         if action == "BUY" and grams == 0:
             # Account warning: cap exposure at 25% of equity.
             weight = min(max_weight, .25) if loss >= .15 else max_weight
@@ -85,9 +89,17 @@ def secretary_backtest(df, buy_window=30, sell_window=30, buy_fraction=.37,
                 is_record = op < ref if phase == "buy" else op > ref
                 if is_record:
                     pending = ("BUY" if phase == "buy" else "SELL", "record")
-            if pending is None and elapsed == w-2:
+            force = force_buy if phase == "buy" else force_sell
+            if pending is None and elapsed == w-2 and force:
                 pending = ("BUY" if phase == "buy" else "SELL", "window_expiry")
-            observations.append(op)
+            if pending is None and elapsed >= w-1:
+                if phase == "buy":
+                    skipped_buy += 1
+                else:
+                    skipped_sell += 1
+                start, observations = i+1, []
+            else:
+                observations.append(op)
         curve.append({"date":r.date,"equity":cash + grams*(cl-half),
                       "cash":cash,"grams":grams,"phase":phase,"halted":halted})
     curve = pd.DataFrame(curve)
@@ -104,6 +116,11 @@ def secretary_backtest(df, buy_window=30, sell_window=30, buy_fraction=.37,
                "cagr":round(float((curve.equity.iloc[-1]/initial)**(1/years)-1),6),
                "max_drawdown":round(float(dd.min()),6),
                "sharpe_rf0":round(float(ret.mean()*252/vol),6) if vol else None,
+               "force_buy":force_buy,"force_sell":force_sell,
+               "skipped_buy":skipped_buy,"skipped_sell":skipped_sell,
+               "holding_fraction":float((curve.grams>0).mean()),
+               "terminal_liquidations":int((trades.reason=="evaluation_end").sum()),
+               "proxy_spread_cost":float(trades.grams.sum()*half),
                "trade_count":len(trades),"buy_window":buy_window,
                "sell_window":sell_window,"buy_fraction":buy_fraction,
                "sell_fraction":sell_fraction,"stop_loss":stop_loss,
