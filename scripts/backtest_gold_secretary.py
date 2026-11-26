@@ -92,9 +92,10 @@ def secretary_backtest(df, buy_window=30, sell_window=30, buy_fraction=.37,
                       "cash":cash,"grams":grams,"phase":phase,"halted":halted})
     curve = pd.DataFrame(curve)
     trades = pd.DataFrame(trades,columns=["date","action","grams","price","reason"])
-    ret = curve.equity.pct_change().fillna(0)
+    ret = curve.equity.pct_change()
+    ret.iloc[0] = curve.equity.iloc[0] / initial - 1
     years = max((curve.date.iloc[-1]-curve.date.iloc[0]).days/365.25,1/365.25)
-    dd = curve.equity / curve.equity.cummax()-1
+    dd = curve.equity / curve.equity.cummax().clip(lower=initial)-1
     vol = float(ret.std(ddof=0)*np.sqrt(252))
     metrics = {"bars":len(curve),"start":str(curve.date.iloc[0].date()),
                "end":str(curve.date.iloc[-1].date()),
