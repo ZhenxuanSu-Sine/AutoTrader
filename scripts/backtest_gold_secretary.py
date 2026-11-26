@@ -84,7 +84,7 @@ def secretary_backtest(df, buy_window=30, sell_window=30, buy_fraction=.37,
             f = buy_fraction if phase == "buy" else sell_fraction
             elapsed = i - start
             k = max(1, min(w-1, math.ceil(w*f)))
-            if elapsed >= k:
+            if elapsed >= k and elapsed <= w-2:
                 ref = min(observations) if phase == "buy" else max(observations)
                 is_record = op < ref if phase == "buy" else op > ref
                 if is_record:
@@ -92,12 +92,12 @@ def secretary_backtest(df, buy_window=30, sell_window=30, buy_fraction=.37,
             force = force_buy if phase == "buy" else force_sell
             if pending is None and elapsed == w-2 and force:
                 pending = ("BUY" if phase == "buy" else "SELL", "window_expiry")
-            if pending is None and elapsed >= w-1:
+            if pending is None and elapsed >= w-2 and not force:
                 if phase == "buy":
                     skipped_buy += 1
                 else:
                     skipped_sell += 1
-                start, observations = i+1, []
+                start, observations = i+2, []
             else:
                 observations.append(op)
         curve.append({"date":r.date,"equity":cash + grams*(cl-half),
