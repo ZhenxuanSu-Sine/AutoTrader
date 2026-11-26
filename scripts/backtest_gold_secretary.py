@@ -144,6 +144,42 @@ def secretary_backtest(df, buy_window=30, sell_window=30, buy_fraction=.37,
     return curve, trades, metrics
 
 
+
+def paired_ablation(df, out, samples=100, seed=20261127, lengths=(60, 120, 252),
+                    buy_window=30, sell_window=30, **kwargs):
+    """Fixed configurations on shared random intervals; no test-set tuning."""
+    df = df.sort_values("date").reset_index(drop=True)
+    rng = np.random.default_rng(seed)
+    rows = []
+    for length in lengths:
+        if length > len(df):
+            continue
+        starts = rng.choice(len(df)-length+1, size=min(samples, len(df)-length+1), replace=False)
+        for start in starts:
+            interval = df.iloc[int(start):int(start)+length]
+            for fraction in (.2, .37, .5, .6, .7):
+                for fb, fs in ((True, True), (False, True), (True, False), (False, False)):
+                    curve, trades, m = secretary_backtest(
+                        interval, buy_window=buy_window, sell_window=sell_window,
+                        buy_fraction=fraction, sell_fraction=fraction,
+                        force_buy=fb, force_sell=fs, **kwargs)
+                    assert curve.grams.iloc[-1] == 0
+                    rows.append(dict(m, interval_id=f"{length}:{start}", length=length,
+                                     cash_fraction=1-m["holding_fraction"],
+                                     zero_trade=int(m["trade_count"] == 0)))
+    table = pd.DataFrame(rows)
+    if table.empty:
+        raise ValueError("no eligible evaluation intervals")
+    table.to_csv(out/"paired_ablation_intervals.csv", index=False)
+    keys = ["length", "buy_fraction", "force_buy", "force_sell"]
+    metrics = ["total_return", "max_drawdown", "proxy_spread_cost", "trade_count",
+               "holding_fraction", "cash_fraction", "skipped_buy", "skipped_sell",
+               "terminal_liquidations", "zero_trade"]
+    summary = table.groupby(keys)[metrics].mean().reset_index()
+    summary.to_csv(out/"paired_ablation_summary.csv", index=False)
+    return summary
+
+
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--csv")
@@ -211,6 +247,8 @@ def main():
     (out/"scan_report.json").write_text(
         json.dumps(report,ensure_ascii=False,indent=2),encoding="utf-8")
     print(json.dumps(report,ensure_ascii=False,indent=2))
+    paired_ablation(test, out, buy_window=args.buy_window, sell_window=args.sell_window,
+                    stop_loss=args.stop_loss, take_profit=args.take_profit)
 
 
 if __name__=="__main__":
