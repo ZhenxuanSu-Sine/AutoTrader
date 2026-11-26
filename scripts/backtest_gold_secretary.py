@@ -1,7 +1,7 @@
 """Secretary-rule gold strategy. Real SGE daily bars, proxy execution only.
 
-Observation and decisions use only current/prior session OPEN values. A forced
-last-day order uses that day's open; no daily close/high/low is used to trade.
+Record signals use session opens; risk signals use completed closes.
+Both execute at the next session open.
 This is not a bank-minute or guaranteed executable price backtest.
 """
 from __future__ import annotations
@@ -17,7 +17,9 @@ from scripts.backtest_gold_daily import load_data
 def secretary_backtest(df, buy_window=30, sell_window=30, buy_fraction=.37,
                        sell_fraction=.37, spread_per_gram=3.8, initial=20000.,
                        max_weight=.8, stop_loss=None, take_profit=None,
-                       force_buy=True, force_sell=True):
+                       force_buy=True, force_sell=True, max_holding_days=None):
+    if max_holding_days is not None and (not isinstance(max_holding_days, int) or max_holding_days < 1):
+        raise ValueError("max_holding_days must be a positive integer")
     for w in (buy_window, sell_window):
         if not isinstance(w, int) or w < 2:
             raise ValueError("windows must be integers >= 2")
@@ -36,7 +38,9 @@ def secretary_backtest(df, buy_window=30, sell_window=30, buy_fraction=.37,
     phase, start, entry = "buy", 0, None
     observations, trades, curve = [], [], []
     pending = None
+    entry_i = None
     skipped_buy = skipped_sell = 0
+    previous_loss = 0.
     half = spread_per_gram / 2
     for i, r in enumerate(df.itertuples(index=False)):
         op, cl = float(r.open), float(r.close)
@@ -46,30 +50,24 @@ def secretary_backtest(df, buy_window=30, sell_window=30, buy_fraction=.37,
         equity_open = cash + grams * bid
         loss = 1 - equity_open / initial
         action, reason = None, None
-        if loss >= .25:
-            halted = True
-        if grams > 0 and (halted or loss >= .20):
-            action, reason = "SELL", "account_risk"
-        elif grams > 0 and entry is not None:
-            pnl = bid / entry - 1
-            if stop_loss is not None and pnl <= -stop_loss:
-                action, reason = "SELL", "stop_loss"
-            elif take_profit is not None and pnl >= take_profit:
-                action, reason = "SELL", "take_profit"
-        # A current-session open can only trigger a NEXT-session fill.
-        if action is None and not halted and pending is not None:
+        if pending is not None:
             action, reason = pending
         pending = None
+        if grams > 0 and max_holding_days is not None and i - entry_i >= max_holding_days:
+            action, reason = "SELL", "max_holding_days"
+        if halted and action == "BUY":
+            action, reason = None, None
         if i == len(df)-1:
             action, reason = ("SELL", "evaluation_end") if grams > 0 else (None, None)
         if action == "BUY" and grams == 0:
             # Account warning: cap exposure at 25% of equity.
-            weight = min(max_weight, .25) if loss >= .15 else max_weight
+            weight = min(max_weight, .25) if previous_loss >= .15 else max_weight
             qty = max(0., min(cash / ask, equity_open * weight / ask))
             if qty > 0:
                 cash -= qty * ask
                 grams += qty
                 entry = ask
+                entry_i = i
                 trades.append({"date":str(r.date.date()),"action":"BUY",
                                "grams":qty,"price":ask,"reason":reason})
                 phase, start, observations = "sell", i+1, []
@@ -100,6 +98,21 @@ def secretary_backtest(df, buy_window=30, sell_window=30, buy_fraction=.37,
                 start, observations = i+2, []
             else:
                 observations.append(op)
+        # Risk signals use the completed close and execute at the next open.
+        close_bid = cl - half
+        previous_loss = 1 - (cash + grams * close_bid) / initial
+        if previous_loss >= .25:
+            halted = True
+        if grams > 0:
+            pnl = close_bid / entry - 1
+            if halted or previous_loss >= .20:
+                pending = ("SELL", "account_risk")
+            elif stop_loss is not None and pnl <= -stop_loss:
+                pending = ("SELL", "stop_loss")
+            elif take_profit is not None and pnl >= take_profit:
+                pending = ("SELL", "take_profit")
+        elif halted:
+            pending = None
         curve.append({"date":r.date,"equity":cash + grams*(cl-half),
                       "cash":cash,"grams":grams,"phase":phase,"halted":halted})
     curve = pd.DataFrame(curve)
@@ -124,10 +137,10 @@ def secretary_backtest(df, buy_window=30, sell_window=30, buy_fraction=.37,
                "trade_count":len(trades),"buy_window":buy_window,
                "sell_window":sell_window,"buy_fraction":buy_fraction,
                "sell_fraction":sell_fraction,"stop_loss":stop_loss,
-               "take_profit":take_profit,"halted":halted,
+               "take_profit":take_profit,"max_holding_days":max_holding_days,"halted":halted,
                "spread_per_gram":spread_per_gram,
                "data_type":"SGE Au99.99 daily proxy; NOT verified bank minute quotes",
-               "execution":"observe open; next-session fill; expiry decision penultimate session to ensure final-window open exit"}
+               "execution":"record signal at open; risk signal at close; next-session fill; scheduled expiry and terminal exits"}
     return curve, trades, metrics
 
 
