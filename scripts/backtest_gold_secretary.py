@@ -53,12 +53,15 @@ def secretary_backtest(df, buy_window=30, sell_window=30, buy_fraction=.37,
         if pending is not None:
             action, reason = pending
         pending = None
-        if grams > 0 and max_holding_days is not None and i - entry_i >= max_holding_days:
+        if grams > 0 and max_holding_days is not None and i - entry_i >= max_holding_days and reason not in ("account_risk", "stop_loss", "take_profit"):
             action, reason = "SELL", "max_holding_days"
         if halted and action == "BUY":
             action, reason = None, None
         if i == len(df)-1:
-            action, reason = ("SELL", "evaluation_end") if grams > 0 else (None, None)
+            if grams == 0:
+                action, reason = None, None
+            elif action != "SELL":
+                action, reason = "SELL", "evaluation_end"
         if action == "BUY" and grams == 0:
             # Account warning: cap exposure at 25% of equity.
             weight = min(max_weight, .25) if previous_loss >= .15 else max_weight
@@ -215,6 +218,7 @@ def main():
     p.add_argument("--sell-window",type=int,default=30)
     p.add_argument("--stop-loss",type=float)
     p.add_argument("--take-profit",type=float)
+    p.add_argument("--max-holding-days",type=int)
     args=p.parse_args()
     df=load_data(args.csv)
     out=Path(args.out);out.mkdir(parents=True,exist_ok=True)
@@ -233,11 +237,13 @@ def main():
             _,_,train_m=secretary_backtest(
                 train,buy_window=args.buy_window,sell_window=args.sell_window,
                 buy_fraction=buy_f,sell_fraction=sell_f,
-                stop_loss=args.stop_loss,take_profit=args.take_profit)
+                stop_loss=args.stop_loss,take_profit=args.take_profit,
+                max_holding_days=args.max_holding_days)
             _,_,test_m=secretary_backtest(
                 test,buy_window=args.buy_window,sell_window=args.sell_window,
                 buy_fraction=buy_f,sell_fraction=sell_f,
-                stop_loss=args.stop_loss,take_profit=args.take_profit)
+                stop_loss=args.stop_loss,take_profit=args.take_profit,
+                max_holding_days=args.max_holding_days)
             results.append({
                 "buy_fraction":buy_f,"sell_fraction":sell_f,
                 "train_total_return":train_m["total_return"],
@@ -267,7 +273,8 @@ def main():
         curve,trades,m=secretary_backtest(
             df,buy_window=args.buy_window,sell_window=args.sell_window,
             buy_fraction=pair[0],sell_fraction=pair[1],
-            stop_loss=args.stop_loss,take_profit=args.take_profit)
+            stop_loss=args.stop_loss,take_profit=args.take_profit,
+                max_holding_days=args.max_holding_days)
         curve.to_csv(out/f"equity_curve_{label}.csv",index=False)
         trades.to_csv(out/f"trades_{label}.csv",index=False)
         report[f"full_sample_{label}"]=m
@@ -275,7 +282,8 @@ def main():
         json.dumps(report,ensure_ascii=False,indent=2),encoding="utf-8")
     print(json.dumps(report,ensure_ascii=False,indent=2))
     paired_ablation(test, out, buy_window=args.buy_window, sell_window=args.sell_window,
-                    stop_loss=args.stop_loss, take_profit=args.take_profit)
+                    stop_loss=args.stop_loss, take_profit=args.take_profit,
+                    max_holding_days=args.max_holding_days)
 
 
 if __name__=="__main__":
