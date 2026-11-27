@@ -52,5 +52,55 @@ class SecretaryTests(unittest.TestCase):
                 secretary_backtest(a,**kw)
 
 
+    def test_four_expiry_modes_flat_market(self):
+        for fb, fs in ((True, True), (False, True), (True, False), (False, False)):
+            with self.subTest(force_buy=fb, force_sell=fs):
+                curve, trades, m = secretary_backtest(
+                    self.bars([500]*70), force_buy=fb, force_sell=fs)
+                self.assertEqual(curve.grams.iloc[-1], 0)
+                if not fb:
+                    self.assertEqual(len(trades), 0)
+                    self.assertEqual(m["skipped_buy"], 2)
+                    self.assertEqual(m["skipped_sell"], 0)
+                    self.assertEqual(m["total_return"], 0)
+                else:
+                    self.assertEqual(list(trades.action), ["BUY", "SELL"])
+                    self.assertEqual(trades.iloc[1].reason,
+                                     "window_expiry" if fs else "evaluation_end")
+                    self.assertEqual(m["skipped_sell"], 0 if fs else 1)
+
+    def test_stop_loss_overrides_expiry_and_holding_limit(self):
+        a = self.bars([500]*70)
+        a.loc[29, "close"] = 450
+        _, trades, _ = secretary_backtest(
+            a, stop_loss=.05, max_holding_days=1)
+        self.assertEqual(trades.iloc[1].reason, "stop_loss")
+        self.assertEqual(trades.iloc[1].date, str(a.date.iloc[30].date()))
+        self.assertAlmostEqual(trades.iloc[1].price, 498.1)
+
+    def test_holding_limit_when_sell_can_be_abandoned(self):
+        a = self.bars([500]*70)
+        _, trades, _ = secretary_backtest(
+            a, force_sell=False, max_holding_days=5)
+        self.assertEqual(trades.iloc[1].reason, "max_holding_days")
+        self.assertEqual(trades.iloc[1].date, str(a.date.iloc[34].date()))
+
+    def test_terminal_open_cannot_open_position(self):
+        curve, trades, m = secretary_backtest(self.bars([500]*30))
+        self.assertEqual(len(trades), 0)
+        self.assertEqual(curve.grams.iloc[-1], 0)
+        self.assertEqual(m["terminal_liquidations"], 0)
+
+    def test_terminal_exit_uses_open_not_close(self):
+        a = self.bars([500]*40)
+        b = a.copy()
+        b.loc[39, "close"] = 900
+        _, ta, ma = secretary_backtest(a)
+        _, tb, mb = secretary_backtest(b)
+        self.assertEqual(ta.to_dict("records"), tb.to_dict("records"))
+        self.assertEqual(ma["final_cny"], mb["final_cny"])
+        self.assertEqual(ma["terminal_liquidations"], 1)
+
+
 if __name__=="__main__":
     unittest.main()
