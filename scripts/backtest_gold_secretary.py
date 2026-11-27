@@ -157,6 +157,17 @@ def paired_ablation(df, out, samples=100, seed=20261127, lengths=(60, 120, 252),
         starts = rng.choice(len(df)-length+1, size=min(samples, len(df)-length+1), replace=False)
         for start in starts:
             interval = df.iloc[int(start):int(start)+length]
+            # Precommitted buy-and-hold benchmark with identical initial exposure and spread.
+            initial = kwargs.get("initial", 20000.)
+            weight = kwargs.get("max_weight", .8)
+            half = kwargs.get("spread_per_gram", 3.8) / 2
+            ask = float(interval.open.iloc[0]) + half
+            qty = initial * weight / ask
+            cash = initial - qty * ask
+            equity = cash + qty * (interval.close.astype(float) - half)
+            equity.iloc[-1] = cash + qty * (float(interval.open.iloc[-1]) - half)
+            baseline_return = float(equity.iloc[-1] / initial - 1)
+            baseline_drawdown = float((equity / equity.cummax().clip(lower=initial) - 1).min())
             for fraction in (.2, .37, .5, .6, .7):
                 for fb, fs in ((True, True), (False, True), (True, False), (False, False)):
                     curve, trades, m = secretary_backtest(
@@ -166,7 +177,11 @@ def paired_ablation(df, out, samples=100, seed=20261127, lengths=(60, 120, 252),
                     assert curve.grams.iloc[-1] == 0
                     rows.append(dict(m, interval_id=f"{length}:{start}", length=length,
                                      cash_fraction=1-m["holding_fraction"],
-                                     zero_trade=int(m["trade_count"] == 0)))
+                                     zero_trade=int(m["trade_count"] == 0),
+                                     baseline_return=baseline_return,
+                                     baseline_drawdown=baseline_drawdown,
+                                     baseline_cost=qty * 2 * half,
+                                     excess_return=m["total_return"]-baseline_return))
     table = pd.DataFrame(rows)
     if table.empty:
         raise ValueError("no eligible evaluation intervals")
@@ -176,6 +191,18 @@ def paired_ablation(df, out, samples=100, seed=20261127, lengths=(60, 120, 252),
                "holding_fraction", "cash_fraction", "skipped_buy", "skipped_sell",
                "terminal_liquidations", "zero_trade"]
     summary = table.groupby(keys)[metrics].mean().reset_index()
+    grouped = table.groupby(keys)
+    summary = summary.merge(grouped.agg(
+        return_median=("total_return", "median"),
+        return_p05=("total_return", lambda x: x.quantile(.05)),
+        loss_probability=("total_return", lambda x: (x < 0).mean()),
+        baseline_return=("baseline_return", "mean"),
+        baseline_drawdown=("baseline_drawdown", "mean"),
+        baseline_cost=("baseline_cost", "mean"),
+        excess_return=("excess_return", "mean"),
+        outperform_probability=("excess_return", lambda x: (x > 0).mean()),
+        sample_count=("total_return", "size"),
+    ).reset_index(), on=keys, validate="one_to_one")
     summary.to_csv(out/"paired_ablation_summary.csv", index=False)
     return summary
 
