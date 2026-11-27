@@ -1,0 +1,33 @@
+name: Gold strategy unit tests
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'scripts/backtest_gold_*.py'
+      - 'autotrader/gold/**'
+      - 'tests/test_gold_*.py'
+      - '.github/workflows/gold-strategy-tests.yml'
+  push:
+    branches: [feature/gold-accumulation-mvp]
+    paths:
+      - 'scripts/backtest_gold_daily.py'
+      - 'scripts/backtest_gold_secretary.py'
+      - 'tests/test_gold_daily_backtest.py'
+      - 'tests/test_gold_secretary.py'
+      - 'tests/test_gold_advisor.py'
+      - 'autotrader/gold/**'
+      - '.github/workflows/gold-strategy-tests.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install 'numpy>=1.26' 'pandas>=2.1' 'pytest>=8'
+      - run: python -m pytest tests/test_gold_daily_backtest.py tests/test_gold_secretary.py tests/test_gold_advisor.py -q

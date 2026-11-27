@@ -1,0 +1,55 @@
+name: Gold daily research backtest
+on:
+  pull_request:
+  push:
+    branches: [feature/gold-accumulation-mvp]
+    paths:
+      - 'scripts/backtest_gold_daily.py'
+      - 'scripts/backtest_gold_secretary.py'
+      - '.github/workflows/gold-daily-backtest.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: baseline
+            risk_args: ''
+          - profile: holding15
+            risk_args: '--max-holding-days 15'
+          - profile: holding30
+            risk_args: '--max-holding-days 30'
+          - profile: holding60
+            risk_args: '--max-holding-days 60'
+          - profile: holding120
+            risk_args: '--max-holding-days 120'
+          - profile: stop05
+            risk_args: '--stop-loss 0.05'
+          - profile: profit10
+            risk_args: '--take-profit 0.10'
+          - profile: joint30
+            risk_args: '--max-holding-days 30 --stop-loss 0.05 --take-profit 0.10'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install data dependencies
+        run: pip install 'akshare>=1.14' 'pandas>=2.1' 'numpy>=1.26'
+      - name: Fetch real Au99.99 history and run proxy backtest
+        run: python scripts/backtest_gold_daily.py
+      - name: Compare secretary observation fractions on the SAME real daily data
+        run: python -m scripts.backtest_gold_secretary --csv artifacts/gold_backtest/au9999_daily.csv ${{ matrix.risk_args }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gold-daily-backtest-${{ matrix.profile }}
+          path: |
+            artifacts/gold_backtest/
+            artifacts/gold_secretary/
+          if-no-files-found: warn
